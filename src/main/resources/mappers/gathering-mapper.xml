@@ -39,11 +39,15 @@
 	</update>
 
 	<insert id="insertRoomUser">
-		INSERT INTO CHAT_ROOM_USER (
-		seq, room_id, member_id, joined_at, last_read_at
-		) VALUES (
-		SEQ_CHAT_ROOM_USER.NEXTVAL, #{room_id}, #{member_id}, SYSDATE, SYSTIMESTAMP
-		)
+	    INSERT INTO CHAT_ROOM_USER (
+	        seq, room_id, member_id, joined_at, last_read_at
+	    ) VALUES (
+	        SEQ_CHAT_ROOM_USER.NEXTVAL, 
+	        #{room_id}, 
+	        #{member_id}, 
+	        CAST(SYSTIMESTAMP AT TIME ZONE 'Asia/Seoul' AS DATE), 
+	        SYSTIMESTAMP AT TIME ZONE 'Asia/Seoul'
+	    )
 	</insert>
 
 	<select id="selectGatheringList" resultType="map">
@@ -72,8 +76,9 @@
 						<otherwise>0</otherwise>
 					</choose> AS "is_joined"
 				FROM chat_room cr
-				LEFT JOIN member m ON cr.owner_id = m.member_id 
+				LEFT JOIN member m ON cr.owner_id = m.member_id
 				WHERE cr.room_type = 'GROUP'
+				  AND NVL(cr.status, 'ACTIVE') = 'ACTIVE'
 				<if test="keyword != null and keyword != ''">
 					AND cr.room_title LIKE '%' || #{keyword} || '%'
 				</if>
@@ -86,6 +91,7 @@
 	<select id="countGatheringList" resultType="int">
 		SELECT COUNT(*) FROM chat_room 
 		WHERE room_type = 'GROUP'
+		  AND NVL(status, 'ACTIVE') = 'ACTIVE'
 		<if test="keyword != null and keyword != ''">
 			AND room_title LIKE '%' || #{keyword} || '%'
 		</if>
@@ -100,6 +106,7 @@
 				cr.room_type,
 				cr.festival_id,
 				cr.owner_id,
+				cr.status,
 				NVL(cr.room_title, fi.title || ' 공식 모임') AS room_title,
 				NVL(cr.room_description, NVL(fi.overview, fi.title || ' 공식 모임방입니다.')) AS room_description,
 				NVL(cr.free_location, fi.addr1) AS free_location,
@@ -109,7 +116,11 @@
 				NVL(cr.max_capacity, 500) AS max_capacity,
 				cr.created_at,
 				m.nickname,
-				m.profile_image_url, NVL(cr.room_image, fi.first_image) AS room_image,
+				m.profile_image_url, 
+				CASE 
+				    WHEN cr.room_type = 'FESTIVAL' THEN NVL(cr.room_image, fi.first_image)
+				    ELSE cr.room_image 
+				END AS room_image,
 				(SELECT COUNT(*) FROM chat_room_user cru WHERE cru.room_id = cr.room_id) AS current_count
 				FROM chat_room cr
 				LEFT JOIN member m ON cr.owner_id = m.member_id
@@ -122,6 +133,7 @@
 				'FESTIVAL' AS room_type,
 				fi.content_id AS festival_id,
 				NULL AS owner_id,
+				'ACTIVE' AS status,
 				fi.title || ' 공식 모임' AS room_title,
 				NVL(fi.overview, fi.title || ' 공식 모임방입니다. 함께 갈 메이트를 구해보세요!') AS room_description,
 				fi.addr1 AS free_location,
@@ -175,6 +187,7 @@
 	    JOIN member m ON cru.member_id = m.member_id
 	    LEFT JOIN chat_room cr ON cru.room_id = cr.room_id
 	    WHERE cru.room_id = #{room_id}
+	    	AND m.status != 'DELETED'
 	    ORDER BY "is_owner" DESC, m.nickname ASC
 	</select>
 	
@@ -188,9 +201,40 @@
 	    JOIN member m ON cru.member_id = m.member_id
 	    LEFT JOIN chat_room cr ON cru.room_id = cr.room_id
 	    WHERE cru.room_id = #{room_id}
+	    	AND m.status != 'DELETED'
 	      AND (cr.owner_id IS NULL OR cru.member_id != cr.owner_id)  
 	    ORDER BY m.nickname ASC
 	</select>
+	
+	<delete id="deleteParticipantFromAllRooms">
+	    DELETE FROM CHAT_ROOM_USER
+	    WHERE member_id = #{member_id}
+	</delete>
+
+	<delete id="deleteBansByOwner">
+	    DELETE FROM CHAT_ROOM_BAN 
+	    WHERE room_id IN (SELECT room_id FROM CHAT_ROOM WHERE owner_id = #{owner_id})
+	</delete>
+
+	<delete id="deleteReportsByOwner">
+	    DELETE FROM CHAT_REPORT 
+	    WHERE room_id IN (SELECT room_id FROM CHAT_ROOM WHERE owner_id = #{owner_id})
+	</delete>
+
+	<delete id="deleteParticipantsByOwner">
+	    DELETE FROM CHAT_ROOM_USER 
+	    WHERE room_id IN (SELECT room_id FROM CHAT_ROOM WHERE owner_id = #{owner_id})
+	</delete>
+
+	<delete id="deleteGatheringsByOwner">
+	    DELETE FROM CHAT_ROOM 
+	    WHERE owner_id = #{owner_id}
+	</delete>
+
+	<delete id="deleteBansByMember">
+	    DELETE FROM CHAT_ROOM_BAN
+	    WHERE member_id = #{member_id}
+	</delete>
 
 	<select id="getRoomCapacityInfo" resultType="map">
 		SELECT
@@ -201,11 +245,15 @@
 	</select>
 
 	<insert id="insertParticipant">
-		INSERT INTO CHAT_ROOM_USER (
-		seq, room_id, member_id, joined_at, last_read_at
-		) VALUES (
-		SEQ_CHAT_ROOM_USER.NEXTVAL, #{room_id}, #{member_id}, SYSDATE, SYSTIMESTAMP
-		)
+	    INSERT INTO CHAT_ROOM_USER (
+	        seq, room_id, member_id, joined_at, last_read_at
+	    ) VALUES (
+	        SEQ_CHAT_ROOM_USER.NEXTVAL, 
+	        #{room_id}, 
+	        #{member_id}, 
+	        CAST(SYSTIMESTAMP AT TIME ZONE 'Asia/Seoul' AS DATE), 
+	        SYSTIMESTAMP AT TIME ZONE 'Asia/Seoul'
+	    )
 	</insert>
 
 	<delete id="deleteParticipant">
@@ -241,7 +289,9 @@
 				FROM festival_info fi
 				LEFT JOIN chat_room cr ON fi.content_id = cr.festival_id AND cr.room_type = 'FESTIVAL'
 				<where>
-					fi.is_visible = 'Y' <if test="keyword != null and keyword != ''">
+					fi.is_visible = 'Y'
+					AND (cr.room_id IS NULL OR NVL(cr.status, 'ACTIVE') = 'ACTIVE')
+					<if test="keyword != null and keyword != ''">
 						AND (cr.room_title LIKE '%' || #{keyword} || '%' OR (cr.room_title IS NULL AND fi.title LIKE '%' || #{keyword} || '%'))
 					</if>
 				</where>
@@ -256,7 +306,9 @@
 		FROM festival_info fi
 		LEFT JOIN chat_room cr ON fi.content_id = cr.festival_id AND cr.room_type = 'FESTIVAL'
 		<where>
-			fi.is_visible = 'Y' <if test="keyword != null and keyword != ''">
+			fi.is_visible = 'Y'
+			AND (cr.room_id IS NULL OR NVL(cr.status, 'ACTIVE') = 'ACTIVE')
+			<if test="keyword != null and keyword != ''">
 				AND (cr.room_title LIKE '%' || #{keyword} || '%' OR (cr.room_title IS NULL AND fi.title LIKE '%' || #{keyword} || '%'))
 			</if>
 		</where>
@@ -270,6 +322,7 @@
 				SELECT 
 					cr.room_id AS "room_id",  
 					LOWER(cr.room_type) AS "room_type", 
+					cr.status AS "status",
 					cr.festival_id AS "festival_id",
 					cr.owner_id AS "owner_id",
 					m.nickname AS "nickname",
@@ -280,7 +333,10 @@
 					    SUBSTR(fi.event_start_date, 1, 4) || '.' || SUBSTR(fi.event_start_date, 5, 2) || '.' || SUBSTR(fi.event_start_date, 7, 2) || ' ~ ' || 
 					    SUBSTR(fi.event_end_date, 1, 4) || '.' || SUBSTR(fi.event_end_date, 5, 2) || '.' || SUBSTR(fi.event_end_date, 7, 2)) AS "free_date",
 					cr.max_capacity AS "max_capacity",
-					NVL(cr.room_image, fi.first_image) AS "room_image", 
+					CASE 
+					    WHEN cr.room_type = 'FESTIVAL' THEN NVL(cr.room_image, fi.first_image)
+					    ELSE cr.room_image 
+					END AS "room_image", 
 					TO_CHAR(cru.joined_at, 'YYYY-MM-DD HH24:MI:SS') AS "joined_at",
 					(SELECT COUNT(*) FROM chat_room_user sub_cru WHERE sub_cru.room_id = cr.room_id) AS "current_count"
 				FROM chat_room cr
@@ -343,7 +399,10 @@
 	            NVL(cr.FREE_DATE, TO_DATE(fi.EVENT_START_DATE, 'YYYYMMDD')) as "freeDate",
 	            TO_DATE(fi.EVENT_END_DATE, 'YYYYMMDD') as "endDate",
 	            cr.MAX_CAPACITY as "maxCapacity",
-	            NVL(cr.ROOM_IMAGE, fi.FIRST_IMAGE) as "roomImage",
+	            CASE 
+	                WHEN cr.ROOM_TYPE = 'FESTIVAL' THEN NVL(cr.ROOM_IMAGE, fi.FIRST_IMAGE)
+	                ELSE cr.ROOM_IMAGE 
+	            END as "roomImage",
 	            (SELECT COUNT(*) FROM CHAT_ROOM_USER cru WHERE cru.ROOM_ID = cr.ROOM_ID) AS "participants"
 	        FROM CHAT_ROOM cr
 	        LEFT JOIN FESTIVAL_INFO fi ON cr.FESTIVAL_ID = fi.CONTENT_ID
@@ -351,6 +410,230 @@
 	          AND (cr.FESTIVAL_ID IS NULL OR fi.IS_VISIBLE = 'Y') ORDER BY "participants" DESC, cr.CREATED_AT DESC
 	    )
 	    WHERE ROWNUM &lt;= 4
+	</select>
+
+	<!-- 모임 신고 등록 -->
+	<insert id="insertReport">
+		INSERT INTO CHAT_REPORT (
+			report_id, room_id, reporter_id, report_reason, created_at
+		) VALUES (
+			SEQ_CHAT_REPORT.NEXTVAL, #{room_id}, #{reporter_id}, #{report_reason}, SYSDATE
+		)
+	</insert>
+
+	<!-- 관리자 모임 목록 조회 -->
+	<select id="selectAdminGatherings" resultType="map" parameterType="map">
+		SELECT * FROM (
+			SELECT ROWNUM AS rnum, res.* FROM (
+				SELECT 
+					cr.ROOM_ID AS "id",
+					NVL(cr.ROOM_TITLE, fi.TITLE || ' 공식 모임') AS "title",
+					NVL(m.NICKNAME, '공식') AS "hostNickname",
+					cr.ROOM_TYPE AS "roomType",
+					CASE WHEN cr.ROOM_TYPE = 'GROUP' THEN '자유모임' ELSE '축제모임' END AS "category",
+					NVL(cr.ROOM_DESCRIPTION, NVL(fi.OVERVIEW, fi.TITLE || ' 공식 모임방입니다.')) AS "description",
+					(SELECT COUNT(*) FROM CHAT_REPORT WHERE ROOM_ID = cr.ROOM_ID) AS "reports",
+					cr.STATUS AS "status",
+					TO_CHAR(cr.CREATED_AT, 'YYYY.MM.DD') AS "createdAt",
+					(SELECT COUNT(*) FROM CHAT_ROOM_USER WHERE ROOM_ID = cr.ROOM_ID) || '/' || cr.MAX_CAPACITY AS "participants",
+					(
+						SELECT LISTAGG(REPORT_REASON, ', ') WITHIN GROUP (ORDER BY CREATED_AT DESC)
+						FROM CHAT_REPORT
+						WHERE ROOM_ID = cr.ROOM_ID
+					) AS "reportReason",
+					(
+						SELECT MAX(ADMIN_MEMO)
+						FROM MEMBER_REPORT_HISTORY
+						WHERE TARGET_ID = cr.ROOM_ID
+						  AND REPORT_TYPE = 'CHAT'
+					) AS "adminMemo"
+				FROM CHAT_ROOM cr
+				LEFT JOIN MEMBER m ON cr.OWNER_ID = m.MEMBER_ID
+				LEFT JOIN FESTIVAL_INFO fi ON cr.FESTIVAL_ID = fi.CONTENT_ID
+				<where>
+					cr.ROOM_TYPE IN ('GROUP', 'FESTIVAL')
+					<if test="status != null and status != '' and status != 'all'">
+						AND cr.STATUS = #{status}
+					</if>
+					<if test="keyword != null and keyword != ''">
+						AND (
+							cr.ROOM_TITLE LIKE '%' || #{keyword} || '%'
+							OR m.NICKNAME LIKE '%' || #{keyword} || '%'
+							OR TO_CHAR(cr.ROOM_ID) LIKE '%' || #{keyword} || '%'
+						)
+					</if>
+					<if test="reportedOnly == true">
+						AND (SELECT COUNT(*) FROM CHAT_REPORT WHERE ROOM_ID = cr.ROOM_ID) &gt; 0
+					</if>
+				</where>
+				<choose>
+					<when test="sortBy == 'reports'">
+						ORDER BY "reports" DESC, cr.CREATED_AT DESC
+					</when>
+					<when test="sortBy == 'oldest'">
+						ORDER BY cr.CREATED_AT ASC
+					</when>
+					<when test="sortBy == 'latest'">
+						ORDER BY cr.CREATED_AT DESC
+					</when>
+					<otherwise>
+						ORDER BY (SELECT COUNT(*) FROM CHAT_ROOM_USER WHERE ROOM_ID = cr.ROOM_ID) DESC, cr.CREATED_AT DESC
+					</otherwise>
+				</choose>
+			) res
+		) WHERE rnum BETWEEN #{startRow} AND #{endRow}
+	</select>
+
+	<!-- 관리자 모임 개수 조회 -->
+	<select id="countAdminGatherings" resultType="int" parameterType="map">
+		SELECT COUNT(*)
+		FROM CHAT_ROOM cr
+		LEFT JOIN MEMBER m ON cr.OWNER_ID = m.MEMBER_ID
+		<where>
+			cr.ROOM_TYPE IN ('GROUP', 'FESTIVAL')
+			<if test="status != null and status != '' and status != 'all'">
+				AND cr.STATUS = #{status}
+			</if>
+			<if test="keyword != null and keyword != ''">
+				AND (
+					cr.ROOM_TITLE LIKE '%' || #{keyword} || '%'
+					OR m.NICKNAME LIKE '%' || #{keyword} || '%'
+					OR TO_CHAR(cr.ROOM_ID) LIKE '%' || #{keyword} || '%'
+				)
+			</if>
+			<if test="reportedOnly == true">
+				AND (SELECT COUNT(*) FROM CHAT_REPORT WHERE ROOM_ID = cr.ROOM_ID) &gt; 0
+			</if>
+		</where>
+	</select>
+
+	<!-- 모임 상태 수정 (ACTIVE, HIDDEN, BLIND 등) -->
+	<update id="updateGatheringStatus">
+		UPDATE CHAT_ROOM
+		SET STATUS = #{status}
+		WHERE ROOM_ID = #{roomId}
+	</update>
+
+	<!-- 특정 모임의 신고 내역 조회 -->
+	<select id="selectReportsByRoomId" resultType="map">
+		SELECT 
+			REPORT_ID AS "report_id",
+			ROOM_ID AS "room_id",
+			REPORTER_ID AS "reporter_id",
+			REPORT_REASON AS "report_reason",
+			CREATED_AT AS "created_at"
+		FROM CHAT_REPORT
+		WHERE ROOM_ID = #{roomId}
+	</select>
+
+	<!-- 신고 이력 테이블의 최대 ID 조회 -->
+	<select id="selectMaxHistoryId" resultType="long">
+		SELECT NVL(MAX(HISTORY_ID), 0)
+		FROM MEMBER_REPORT_HISTORY
+	</select>
+
+	<!-- 신고 처리 이력 등록 -->
+	<insert id="insertReportHistory">
+		INSERT INTO MEMBER_REPORT_HISTORY (
+			HISTORY_ID,
+			TARGET_MEMBER_ID,
+			REPORTER_MEMBER_ID,
+			REPORT_TYPE,
+			REPORT_ID,
+			TARGET_ID,
+			REASON,
+			RESULT_STATUS,
+			ADMIN_MEMO,
+			CREATED_AT
+		) VALUES (
+			#{historyId},
+			#{targetMemberId},
+			#{reporterId},
+			'CHAT',
+			#{reportId},
+			#{roomId},
+			#{reason},
+			#{resultStatus},
+			#{adminMemo},
+			SYSDATE
+		)
+	</insert>
+
+	<!-- 특정 모임에 대한 이력이 존재하는지 확인 -->
+	<select id="checkHistoryExists" resultType="int">
+		SELECT COUNT(*)
+		FROM MEMBER_REPORT_HISTORY
+		WHERE TARGET_ID = #{roomId}
+		  AND REPORT_TYPE = 'CHAT'
+	</select>
+
+	<!-- 특정 모임의 신고 이력 메모 업데이트 -->
+	<update id="updateReportHistoryMemo">
+		UPDATE MEMBER_REPORT_HISTORY
+		SET ADMIN_MEMO = #{adminMemo}
+		WHERE TARGET_ID = #{roomId}
+		  AND REPORT_TYPE = 'CHAT'
+	</update>
+
+	<!-- 동일인 중복 신고 접수 확인 카운트 -->
+	<select id="selectReportCountByReporter" resultType="int">
+		SELECT COUNT(*)
+		FROM CHAT_REPORT
+		WHERE ROOM_ID = #{roomId}
+		  AND REPORTER_ID = #{reporterId}
+	</select>
+
+	<!-- 특정 모임방의 모든 신고 물리 삭제 -->
+	<delete id="deleteReportsByRoomId">
+		DELETE FROM CHAT_REPORT
+		WHERE ROOM_ID = #{roomId}
+	</delete>
+
+	<!-- 개별 신고 상세 조회 -->
+	<select id="selectReportById" resultType="map">
+		SELECT 
+			REPORT_ID AS "report_id",
+			ROOM_ID AS "room_id",
+			REPORTER_ID AS "reporter_id",
+			REPORT_REASON AS "report_reason",
+			CREATED_AT AS "created_at"
+		FROM CHAT_REPORT
+		WHERE REPORT_ID = #{reportId}
+	</select>
+
+	<!-- 개별 신고 삭제 -->
+	<delete id="deleteReportById">
+		DELETE FROM CHAT_REPORT
+		WHERE REPORT_ID = #{reportId}
+	</delete>
+
+	<!-- 신고 누적 집중 모니터링 모임 조회 (3회 이상) -->
+	<select id="selectCautionGatherings" resultType="map">
+		SELECT 
+			cr.ROOM_ID AS "id",
+			NVL(cr.ROOM_TITLE, fi.TITLE || ' 공식 모임') AS "title",
+			NVL(m.NICKNAME, '공식') AS "hostNickname",
+			cr.ROOM_TYPE AS "roomType",
+			CASE WHEN cr.ROOM_TYPE = 'GROUP' THEN '자유모임' ELSE '축제모임' END AS "category",
+			(SELECT COUNT(*) FROM CHAT_REPORT WHERE ROOM_ID = cr.ROOM_ID) AS "reports",
+			cr.STATUS AS "status",
+			TO_CHAR(cr.CREATED_AT, 'YYYY.MM.DD') AS "createdAt",
+			(
+				SELECT LISTAGG(REPORT_REASON, ', ') WITHIN GROUP (ORDER BY CREATED_AT DESC)
+				FROM CHAT_REPORT
+				WHERE ROOM_ID = cr.ROOM_ID
+			) AS "reportReason",
+			(
+				SELECT MAX(ADMIN_MEMO)
+				FROM MEMBER_REPORT_HISTORY
+				WHERE TARGET_ID = cr.ROOM_ID
+				  AND REPORT_TYPE = 'CHAT'
+			) AS "adminMemo"
+		FROM CHAT_ROOM cr
+		LEFT JOIN MEMBER m ON cr.OWNER_ID = m.MEMBER_ID
+		LEFT JOIN FESTIVAL_INFO fi ON cr.FESTIVAL_ID = fi.CONTENT_ID
+		WHERE (SELECT COUNT(*) FROM CHAT_REPORT WHERE ROOM_ID = cr.ROOM_ID) &gt;= 3
+		ORDER BY "reports" DESC, cr.CREATED_AT DESC
 	</select>
 
 </mapper>
