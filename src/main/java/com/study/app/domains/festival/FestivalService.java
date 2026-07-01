@@ -23,6 +23,7 @@ import org.springframework.web.util.UriComponentsBuilder;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.study.app.domains.achievement.AchievementService.ActivityType;
 import com.study.app.domains.festival.dto.CommonDetailDTO;
 import com.study.app.domains.festival.dto.FestImageDTO;
 import com.study.app.domains.festival.dto.FestivalDTO;
@@ -90,10 +91,10 @@ public class FestivalService {
 		
 		FestivalDTO festival = fdao.getRandomFestival();
 		result.put("festival", festival);
-		
+		System.out.println("[디버그] festival 존재 여부: " + (festival != null) + ", memberId: " + memberId);
 		if (festival != null && memberId != null) {
 			// 로그인한 유저의 경우 랜덤 뽑기 업적 업데이트
-			achievementResults = achievementService.updateProgress(memberId, "RANDOM_PICK");
+			achievementResults = achievementService.addActivityExp(memberId,ActivityType.RANDOM_PICK);
 		}
 		
 		result.put("achievements", achievementResults);

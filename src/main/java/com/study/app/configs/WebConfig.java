@@ -19,7 +19,9 @@ public class WebConfig implements WebMvcConfigurer {
                 .addPathPatterns(
                         "/api/festivals/likeList",   // 나의 찜 목록 조회
                         "/api/festivals/likeToggle", // 찜하기 토글
-                        "/api/festivals/sync"        // 축제 데이터 동기화
+                        "/api/festivals/sync",        // 축제 데이터 동기화
+                        "/api/festivals/random"
+                        
                 );
 
         // 2. 기존 전역 설정 (여기서는 축제 전체/**를 제외하여 비회원 자유 권한을 유지)
